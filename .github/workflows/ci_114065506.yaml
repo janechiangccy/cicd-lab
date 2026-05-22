@@ -1,0 +1,62 @@
+name: CI
+
+# 任何分支的 push 都會自動觸發；workflow_dispatch 允許在 Actions 頁面手動重跑。
+on:
+  push:
+  workflow_dispatch:
+
+# dorny/test-reporter 需要 checks: write 才能把測試結果寫成 Check Run。
+permissions:
+  contents: read
+  checks: write
+
+jobs:
+  ci:
+    name: Lint, Typecheck & Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # --- 檢查 1：TypeScript 型別檢查（tsc --noEmit）---
+      - name: TypeScript typecheck
+        run: npm run typecheck
+
+      # --- 檢查 2：Prettier 格式檢查（prettier --check .）---
+      - name: Prettier format check
+        run: npm run format:check
+
+      # --- 檢查 3：執行測試，並輸出 JUnit XML 報告 ---
+      - name: Run tests
+        id: test
+        run: |
+          mkdir -p reports
+          npm test -- --reporter=default --reporter=junit --outputFile.junit=reports/vitest-junit.xml
+
+      # 把 JUnit 報告轉成 Actions 結果頁上的測試結果表格（即使測試失敗也要發布）。
+      - name: Publish test results
+        uses: dorny/test-reporter@v3
+        if: ${{ !cancelled() && steps.test.conclusion != 'skipped' }}
+        with:
+          name: Vitest Test Results
+          path: reports/vitest-junit.xml
+          reporter: java-junit
+
+      # 另外把報告檔存成 artifact，方便下載查看。
+      - name: Upload test report artifact
+        uses: actions/upload-artifact@v7
+        if: ${{ !cancelled() && steps.test.conclusion != 'skipped' }}
+        with:
+          name: test-report
+          path: reports/
+          if-no-files-found: error
